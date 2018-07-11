@@ -1,4 +1,3 @@
-### DNA_extr_PCR_impacts
 
 Sequence processing and analysis code used to investigate the effects of different DNA extraction methods and PCR variability on multi-taxon DNA meta-barcoding estimates of soil biodiversity.
 
