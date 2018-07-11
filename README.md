@@ -4,4 +4,4 @@ Sequence processing and analysis code used to investigate the effects of differe
 
 
 Citation: 
-# Andrew Dopheide, Dong Xie, Thomas R. Buckley, Alexei J. Drummond, and Richard D. Newcomb. **Impacts of DNA extraction and PCR on DNA metabarcoding estimates of soil biodiversity.**
+## Andrew Dopheide, Dong Xie, Thomas R. Buckley, Alexei J. Drummond, and Richard D. Newcomb. **Impacts of DNA extraction and PCR on DNA metabarcoding estimates of soil biodiversity.**
