@@ -14,7 +14,7 @@ def run_PEAR(R1_file, R2_file, outfile, log):
     print(start_PEAR)
     subprocess.call(start_PEAR.split(), stdout = log, stderr = subprocess.STDOUT)
 
-os.chdir("NZGL01278_data") # Path to raw sequence data
+os.chdir("Wx80_sequence_data") # Path to raw sequence data
 log = open("PEAR_log.txt", "a")
 R1_files = glob.glob("*R1_001.fastq")
 for R1_file in R1_files:
@@ -116,7 +116,7 @@ sample_IDs.close()
 # For unmerged R1 reads, trim to 250 bp.
 ###############################################################################
 
-#usearch = "../usearch7.0.1090_i86linux64"
+#usearch = "../Usearch/usearch7.0.1090_i86linux64"
 usearch = "../Usearch/usearch8.0.1623_i86linux64"
 
 def filter_trim_merged(input_file, label, minlen, maxee, log):
