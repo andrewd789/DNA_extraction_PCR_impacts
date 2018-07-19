@@ -247,134 +247,94 @@ for (gene in genes) {
 # Specifically, calculation of gamma (aka total alpha) diversity for:
 # (1) Combinations of one to ten PCRs
 # (2) Combinations of one to ten PCRs, subsampled to equal sequence depth per combination;
-# (3) Combinations of one to ten PCRs, limited to OTUs occurring in at least x PCRs
-# (4) Combinations of one to ten PCRs, limited to OTUs with abundances above x
+# (3) Combinations of one to ten PCRs, limited to OTUs occurring in at least two or three PCRs
+# (4) Combinations of one to ten PCRs, limited to OTUs with abundances above a threshold
 # (5) All PCRs combined and subsampled to 10 %, 20 %, 30 % etc. to 100 % 
 # This is all a bit slow to calculate
 ###############################################################################
 
 # Functions for biodiversity estimation based on variable combinations of PCRs
-# No subsampling before biodiversity calculations:
-gamma.calcs <- function(tab){
+gamma.calcs <- function(tab, method = "combos", subs = FALSE){
   gamma0 <- list()
   gamma1 <- list()
   gamma2 <- list()
   table1 <- tab[,colSums(tab) > 1000] # Exclude any low abundance (i.e. failed) PCRs
-  for(i in 1:ncol(table1)){
-    print(paste("analysing combos", i))
-    combos <- combn(table1, i, simplify = FALSE) # Get all combinations
-    if(length(combos) > 25){  # Limit to 25 combinations of data (to limit processing time)
-      combos <- sample(combos, 25)
+  m <- min(colSums(table1)) # Threshold for subsampling
+
+  if(grepl("combos", method)){
+    for(i in 1:ncol(table1)){
+      print(paste("analysing combos", i))
+      combos <- combn(table1, i, simplify = FALSE) # Get all combinations
+      if(length(combos) > 25){  # Limit to 25 combinations of data (to limit processing time)
+        combos <- sample(combos, 25)
+      }
+      combos.t <- lapply(combos, t) # Transpose each set of combinations
+      if(subs){ # Subsample to equal total number of reads
+        combos.t <- lapply(combos.t, function(x) as.data.frame(rrarefy(x, m/i))) 
+      }
+      gamma0[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 0))
+      gamma1[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 1))
+      gamma2[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 2))
     }
-    combos.t <- lapply(combos, t) # transpose
-    gamma0[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 0))
-    gamma1[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 1))
-    gamma2[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 2))
+  }
+  else if(grepl("percent", method)){
+    sums <- rowSums(table1)
+    m <- sum(sums) # Total sequence count
+    for(i in 1:10){
+      x <- i/10*m # Subsample size (steps of 10 %)
+      print(paste("analysing percent subsample", x))
+      sums.r <- list()
+      sums.t <- t(sums)
+      for(j in 1:10){
+        sums.r[[j]] <- rrarefy(sums.t, x)
+      }
+      gamma0[[i]] <- sapply(sums.r, function(x) d(x, lev = "gamma", q = 0))
+      gamma1[[i]] <- sapply(sums.r, function(x) d(x, lev = "gamma", q = 1))
+      gamma2[[i]] <- sapply(sums.r, function(x) d(x, lev = "gamma", q = 2))
+    }
   }
   gamma.list <- list("gamma0" = gamma0, "gamma1" = gamma1, "gamma2" = gamma2)
   return(gamma.list)
 }
 
-# Subsample combined PCRs to equal sequence depth before biodiversity calculations:
-gamma.subs.calcs <- function(tab){
-  gamma0.subs <- list()
-  gamma1.subs <- list()
-  gamma2.subs <- list()
-  table1 <- tab[,colSums(tab) > 1000] # Exclude any low abundance (i.e. failed) PCRs
-  m <- min(colSums(table1))
-  for(i in 1:ncol(table1)){
-    print(paste("analysing subsampled combos", i))
-    combos <- combn(table1, i, simplify = FALSE) # Get all combinations
-    if(length(combos) > 25){  # Limit to 25 combinations of data (to limit processing time)
-      combos <- sample(combos, 25)
-    }
-    combos.t <- lapply(combos, t) # transpose
-    combos.r <- lapply(combos.t, function(x) as.data.frame(rrarefy(x, m/i))) # Subsample to equal total number of reads
-    gamma0.subs[[i]] <- sapply(combos.r, function(x) d(x, lev = "gamma", q = 0))
-    gamma1.subs[[i]] <- sapply(combos.r, function(x) d(x, lev = "gamma", q = 1))
-    gamma2.subs[[i]] <- sapply(combos.r, function(x) d(x, lev = "gamma", q = 2))
-  }
-  gamma.subs.list <- list("gamma0_subs" = gamma0.subs, "gamma1_subs" = gamma1.subs, "gamma2_subs" = gamma2.subs)
-  return(gamma.subs.list)
-}
 
-# Functions to calculate biodiversity estimates for variable numbers of PCRs,
-# but limited to OTUs occurring in multiple PCRs
-restr <- function(tab, thr = 5){
+# Function to limit OTU table to OTUs occurring in multiple PCRs
+restr <- function(tab, restr.thr = 2){
   occs <- apply(tab, 1, function(x) sum(x>0))
-  occs <- occs[occs >= thr]
+  occs <- occs[occs >= restr.thr]
   tab <- tab[which(rownames(tab) %in% names(occs)), ]
   print(nrow(tab))
   return(tab)
 }
 
-gamma.calcs.restr <- function(tab){
-  gamma0 <- list()
-  gamma1 <- list()
-  gamma2 <- list()
-  table1 <- tab[,colSums(tab) > 1000] # Exclude any low abundance (i.e. failed) PCRs
-  table1 <- restr(table1, 3) # Limit to OTUs occurring in multiple PCRs  
-  for(i in 1:ncol(table1)){
-    print(paste("analysing combos", i))
-    combos <- combn(table1, i, simplify = FALSE) # Get all combinations
-    if(length(combos) > 25){  # Limit to 25 combinations of data (to limit processing time)
-      combos <- sample(combos, 25)
-    }
-    combos.t <- lapply(combos, t) # transpose
-    gamma0[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 0))
-    gamma1[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 1))
-    gamma2[[i]] <- sapply(combos.t, function(x) d(x, lev = "gamma", q = 2))
-  }
-  gamma.list <- list("gamma0" = gamma0, "gamma1" = gamma1, "gamma2" = gamma2)
-  return(gamma.list)
-}
-
-# Function to calculate biodiversity estimates for percentage subsamples of total sequences:
-gamma.pc.calcs <- function(tab){
-  gamma0.pc <- list()
-  gamma1.pc <- list()
-  gamma2.pc <- list()
-  table1 <- tab[,colSums(tab) > 1000] # Exclude any low abundance (i.e. failed) PCRs
-  sums <- rowSums(table1)
-  m <- sum(sums) # Total sequence count
-  for(i in 1:10){
-    x <- i/10*m # Subsample size (steps of 10 %)
-    print(paste("analysing percent subsample", x))
-    sums.r <- list()
-    sums.t <- t(sums)
-    for(j in 1:10){
-      sums.r[[j]] <- rrarefy(sums.t, x)
-    }
-    gamma0.pc[[i]] <- sapply(sums.r, function(x) d(x, lev = "gamma", q = 0))
-    gamma1.pc[[i]] <- sapply(sums.r, function(x) d(x, lev = "gamma", q = 1))
-    gamma2.pc[[i]] <- sapply(sums.r, function(x) d(x, lev = "gamma", q = 2))
-  }
-  gamma.pc.list <- list("gamma0_pc" = gamma0.pc, "gamma1_pc" = gamma1.pc, "gamma2_pc" = gamma2.pc) 
-  return(gamma.pc.list)
-}
-
 # Function to tidy diversity estimate results
-tidy.gamma <- function(gamma.res, gene, s, pc = FALSE){
+tidy.gamma <- function(gamma.res, gene, s, var){
   gamma.long <- melt(gamma.res)
-  if(pc == FALSE){
-    colnames(gamma.long) <- c("gamma value", "rep columns", "measure")
-  }else{
-    colnames(gamma.pc.long) <- c("gamma value", "percent x 10", "measure")
-  }
+  colnames(gamma.long) <- c("value", "rep.combos", "measure")
   gamma.long$sample <- s 
   gamma.long$gene <- gene
+  gamma.long$variable <- var
   return(gamma.long)
 }
 
 # Now calculate diversity estimates for all datasets (this is rather slow):
 genelist <- c("16S","18S","26S","COI")
 
+all.div <- data.frame()
+all.div.subs <- data.frame()
+all.div.restr <- data.frame()
+all.div.abund <- data.frame()
+all.div.pc <- data.frame()
+
+abund.thr <- 5 # For limiting to OTUs with overall abundances above threshold
+restr.thr <- 2 # For limiting to OTUs detected in as least x of each set of ten PCRs
+
 for(gene in genelist){
   f <- Sys.glob(paste0("Wx80_OTU_tables/Wx80_*", gene, "*_MEE1.0_min2_OTUtable.txt"))
   OTUtable <- read.table(f, header = TRUE, row.names = 1, sep = "\t")
   
-  # For biodiversity estimates with low abundance OTUs excluded:
-  OTUtable.limited <- OTUtable[which(rowSums(OTUtable) >= 5), ]
+  # For biodiversity estimates with low overall abundance OTUs excluded:
+  OTUtable.limited <- OTUtable[which(rowSums(OTUtable) >= abund.thr), ]
 
   # Set up empty lists to hold each set of results
   gamma.data <- list()
@@ -392,103 +352,65 @@ for(gene in genelist){
     # Subset to set of ten PCRs 
     tab <- OTUtable[, grepl(s, colnames(OTUtable))] 
     tab.lim <- OTUtable.limited[, grepl(s, colnames(OTUtable.limited))] # Abundance limited OTUtable
+    tab.restr <- restr(tab, restr.thr = 2) # Limit to OTUs occurring in at least two ot ten PCRs 
     
     # Calculate biodiversity estimates
-    gamma <- gamma.calcs(tab) # Estimates for multiple PCRs without subsampling
-    gamma.subs <- gamma.subs.calcs(tab) # Estimates for multiple PCRs subsampled to equal read depth
-    gamma.restr <- gamma.calcs.restr(tab) # Estimates limited to OTUs detected in multiple PCRs
-    gamma.abund <- gamma.calcs(tab.lim) # Estimates for multiple PCRs with low abundance OTUs excluded
-    gamma.pc <- gamma.pc.calcs(tab) # Estimates by percentage subsets
+    gamma <- gamma.calcs(tab, method = "combos", subs = FALSE) # Estimates for multiple PCRs without subsampling
+    gamma.subs <- gamma.calcs(tab, method = "combos", subs = TRUE) # Estimates for multiple PCRs subsampled to equal read depth
+    gamma.restr <- gamma.calcs(tab.restr, method = "combos", subs = FALSE) # Estimates limited to OTUs detected in multiple PCRs
+    gamma.abund <- gamma.calcs(tab.lim, method = "combos", subs = FALSE) # Estimates for multiple PCRs with low abundance OTUs excluded
+    gamma.pc <- gamma.calcs(tab, method = "percent", subs = FALSE) # Estimates by percentage subsets
     
-    gamma.data[[n]] <- tidy.gamma(gamma, gene, s, pc = FALSE)
-    gamma.subs.data[[n]] <- tidy.gamma(gamma.subs, gene, s, pc = FALSE)
-    gamma.restr.data[[n]] <- tidy.gamma(gamma.restr, gene, s, pc = FALSE)
-    gamma.abund.data[[n]] <- tidy.gamma(gamma.abund, gene, s, pc = FALSE)
-    gamma.pc.data[[n]] <- tidy.gamma(gamma.pc, gene, s, pc = TRUE)
+    gamma.data[[n]] <- tidy.gamma(gamma, gene, s, var = "combos")
+    gamma.subs.data[[n]] <- tidy.gamma(gamma.subs, gene, s, var = "combos_subsampled")
+    gamma.restr.data[[n]] <- tidy.gamma(gamma.restr, gene, s, var = "combos_restricted")
+    gamma.abund.data[[n]] <- tidy.gamma(gamma.abund, gene, s, var = "abund_limited")
+    gamma.pc.data[[n]] <- tidy.gamma(gamma.pc, gene, s, var = "percent_subsamples")
     
     n <- n +1
   }
   
   # Organise the data into a table, then output to file
-  gamma.div <- melt(gamma.data, id.vars = c("gamma value", "rep columns", 
-                                            "measure", "gene", "sample"))
-  gamma.div.subs <- melt(gamma.subs.data, id.vars = c("gamma value", "rep columns", 
-                                                      "measure", "gene", "sample"))
-  gamma.div.restr <- melt(gamma.restr.data, id.vars = c("gamma value", "rep columns", 
-                                                        "measure", "gene", "sample"))
-  gamma.div.abund <- melt(gamma.abund.data, id.vars = c("gamma value", "rep columns", 
-                                                        "measure", "gene", "sample"))
-  gamma.div.pc <- melt(gamma.pc.data, id.vars = c("gamma value", "percent x 10", 
-                                                  "measure", "gene", "sample"))
+  gamma.div <- melt(gamma.data, id.vars = c("value", "rep.combos", "measure", "gene", "sample", "variable"))
+  gamma.div.subs <- melt(gamma.subs.data, id.vars = c("value", "rep.combos", "measure", "gene", "sample", "variable"))
+  gamma.div.restr <- melt(gamma.restr.data, id.vars = c("value", "rep.combos", "measure", "gene", "sample", "variable"))
+  gamma.div.abund <- melt(gamma.abund.data, id.vars = c("value", "rep.combos", "measure", "gene", "sample", "variable"))
+  gamma.div.pc <- melt(gamma.pc.data, id.vars = c("value", "rep.combos", "measure", "gene", "sample", "variable"))
   
-  write.table(gamma.div, file = paste0("Wx80_", gene, "_PCR_reps_min2_gamma_div.txt"), 
-               sep = "\t", quote = F, row.names = F)
-  write.table(gamma.div.subs, file = paste0("Wx80_", gene, "_PCR_reps_min2_gamma_div_subsampled.txt"), 
-               sep = "\t", quote = F, row.names = F)
-  write.table(gamma.div.restr, file = paste0("Wx80_", gene, "_PCR_reps_min2_gamma_div_restr3.txt"), 
-              sep = "\t", quote = F, row.names = F)
-  write.table(gamma.div.abund, file = paste0("Wx80_", gene, "_PCR_reps_min2_gamma_div_thr5.txt"), 
-              sep = "\t", quote = F, row.names = F)
-  write.table(gamma.div.pc, file = paste0("Wx80_", gene, "_PCR_reps_min2_gamma_div_percent.txt"), 
-               sep = "\t", quote = F, row.names = F)
+  all.div <- rbind(all.div, gamma.div)
+  all.div.subs <- rbind(all.div.subs, gamma.div.subs)
+  all.div.restr <- rbind(all.div.restr, gamma.div.restr)
+  all.div.abund <- rbind(all.div.abund, gamma.div.abund)
+  all.div.pc <- rbind(all.div.pc, gamma.div.pc)
 }
 
-# Now plot alpha diversity estimate curves
-# Load all the data
-f1 <- Sys.glob("Wx80_alpha_diversity_per_reps/*replicates_min2_gamma_div.txt")
-f2 <- Sys.glob("Wx80_alpha_diversity_per_reps/*replicates_min2_gamma_div_subsampled.txt") # Subsampled combinations data
-f3 <- Sys.glob("Wx80_alpha_diversity_per_reps/*replicates_min2_gamma_div_restr3.txt") # Restricted data
-f4 <- Sys.glob("Wx80_alpha_diversity_per_reps/*replicates_min2_gamma_div_thr5.txt") # Abundance limited data
-f5 <- Sys.glob("Wx80_alpha_diversity_per_reps/*replicates_min2_gamma_div_percent.txt") # Percent subsampled data
+# Output data to file
+write.table(all.div, file = paste0("Wx80_PCR_reps_min2_gamma_div.txt"), 
+           sep = "\t", quote = F, row.names = F)
+write.table(all.div.subs, file = paste0("Wx80_PCR_reps_min2_gamma_div_subsampled.txt"), 
+           sep = "\t", quote = F, row.names = F)
+write.table(all.div.restr, file = paste0("Wx80_PCR_reps_min2_gamma_div_restr", restr.thr, ".txt"), 
+            sep = "\t", quote = F, row.names = F)
+write.table(all.div.abund, file = paste0("Wx80_PCR_reps_min2_gamma_div_thr", abund.thr, ".txt"), 
+            sep = "\t", quote = F, row.names = F)
+write.table(all.div.pc, file = paste0("Wx80_PCR_reps_min2_gamma_div_percent.txt"), 
+            sep = "\t", quote = F, row.names = F)
+
+
+# Now plot various alpha diversity estimate curves
+# Load all the data (if needed)
+f1 <- Sys.glob("Wx80_PCR_reps_min2_gamma_div.txt")
+f2 <- Sys.glob("Wx80_PCR_reps_min2_gamma_div_subsampled.txt") # Subsampled combinations data
+f3 <- Sys.glob("Wx80_PCR_reps_min2_gamma_div_restr2.txt") # Restricted data
+f4 <- Sys.glob("Wx80_PCR_reps_min2_gamma_div_thr5.txt") # Abundance limited data
+f5 <- Sys.glob("Wx80_PCR_reps_min2_gamma_div_percent.txt") # Percent subsampled data
 
 # Load all the data
-n <- 1
 all.div <- data.frame()
-for (f in f1) {
+for (f in c(f1, f2, f3, f4, f5)){
   df <- read.table(f, sep = "\t", header = TRUE)
-  gene = sapply(strsplit(f, "per_reps/Wx80_"), "[[", 2)
-  gene = sapply(strsplit(gene, "_PCR"), "[[", 1)
-  df$gene <- gene
-  df$var <- "combos"
   all.div <- rbind(all.div, df)
 } 
-
-for (f in f2) {  
-  df <- read.table(f, sep = "\t", header = TRUE)
-  gene = sapply(strsplit(f, "per_reps/Wx80_"), "[[", 2)
-  gene = sapply(strsplit(gene, "_PCR"), "[[", 1)
-  df$gene <- gene
-  df$var <- "combos_subsampled"
-  all.div <- rbind(all.div, df)
-}
-
-for (f in f3) {  
-  df <- read.table(f, sep = "\t", header = TRUE)
-  gene = sapply(strsplit(f, "per_reps/Wx80_"), "[[", 2)
-  gene = sapply(strsplit(gene, "_PCR"), "[[", 1)
-  df$gene <- gene
-  df$var <- "combos_restricted"
-  all.div <- rbind(all.div, df)
-}
-
-for (f in f4) {  
-  df <- read.table(f, sep = "\t", header = TRUE)
-  gene = sapply(strsplit(f, "per_reps/Wx80_"), "[[", 2)
-  gene = sapply(strsplit(gene, "_PCR"), "[[", 1)
-  df$gene <- gene
-  df$var <- "abund_limited"
-  all.div <- rbind(all.div, df)
-}
-
-for (f in f5) {  
-  df <- read.table(f, sep = "\t", header = TRUE)
-  gene = sapply(strsplit(f, "per_reps/Wx80_"), "[[", 2)
-  gene = sapply(strsplit(gene, "_PCR"), "[[", 1)
-  df$gene <- gene
-  df$var <- "percent_subsamples"
-  colnames(df) <- gsub("percent.x.10", "rep.columns", colnames(df)) # make column match the other datasets
-  all.div <- rbind(all.div, df)
-}
 
 # Organise the data for plotting
 all.div$subplot <- sapply(strsplit(as.character(all.div$sample), "_"), "[[", 1)
@@ -508,8 +430,8 @@ all.div$method2.var <- paste(all.div$method2)
 
 # Plot alpha 0/1 curves for combinations of PCRs and subsampled combinations of PCRs, for each subplot separately)
 for(s in c("D", "P")){
-  div1 <- all.div[all.div$subplot == s & all.div$measure2 != "2" & all.div$var == "combos", ]
-  p1 <- ggplot(div1, aes(x = rep.columns, y = gamma.value, colour = measure2)) + 
+  div1 <- all.div[all.div$subplot == s & all.div$measure2 != "2" & all.div$variable == "combos", ]
+  p1 <- ggplot(div1, aes(x = rep.columns, y = value, colour = measure2)) + 
     geom_jitter(alpha = 0.5) +
     scale_colour_manual(values = c("#E69F00", "#56B4E9")) +
     scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) +
@@ -519,8 +441,8 @@ for(s in c("D", "P")){
           panel.grid.minor = element_blank(), legend.position = "None")
   p1
   
-  div2 <- all.div[all.div$subplot == s & all.div$measure2 != "2" & all.div$var == "combos_subsampled", ]
-  p2 <- ggplot(div2, aes(x = rep.columns, y = gamma.value, colour = measure2)) + 
+  div2 <- all.div[all.div$subplot == s & all.div$measure2 != "2" & all.div$variable == "combos_subsampled", ]
+  p2 <- ggplot(div2, aes(x = rep.combos, y = value, colour = measure2)) + 
     geom_jitter(alpha = 0.5) +
     scale_colour_manual(values = c("#E69F00", "#56B4E9")) +
     scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) +
@@ -535,12 +457,12 @@ for(s in c("D", "P")){
 }
 
 # Plot alpha 0/1 curves for data limited to OTUs with at least 5 sequences, for both subplots together
-div <- all.div[all.div$measure2 != "2" & all.div$var == "combos", ]
+div <- all.div[all.div$measure2 != "2" & all.div$variable == "abund_limited", ]
 div$method2.subplot <- paste0(div$subplot, ", ", div$method2)
 div$method2.subplot <- factor(div$method2.subplot, levels = c("D, 10 x 1.5 g direct", "D, 2 x 7.5 g direct", "D, 1 x 15 g indirect",
                                                               "D, 1 x 15 g PO4 buffer", "P, 10 x 1.5 g direct", "P, 2 x 7.5 g direct",
                                                               "P, 1 x 15 g indirect","P, 1 x 15 g PO4 buffer"), ordered = TRUE)
-p <- ggplot(div, aes(x = rep.columns, y = gamma.value, colour = measure2)) + 
+p <- ggplot(div, aes(x = rep.combos, y = value, colour = measure2)) + 
   geom_jitter(alpha = 0.5) +
   scale_colour_manual(values = c("#E69F00", "#56B4E9")) +
   scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) +
@@ -552,31 +474,31 @@ p
 ggsave(p, "Wx80_all_genes_PCR_reps_alpha-0-1_thr5_subplots_D_P.pdf", height = 21, width = 29.7, units = "cm", useDingbats = FALSE)
 
 ### Plot alpha 0/1 curves for all data restricted to OTUs in multiple PCRs, for both subplots together
-div <- all.div[all.div$measure2 != "2" & all.div$var == "combos_restricted", ]
+div <- all.div[all.div$measure2 != "2" & all.div$variable == "combos_restricted", ]
 div$method2.subplot <- paste0(div$subplot, ", ", div$method2)
 div$method2.subplot <- factor(div$method2.subplot, levels = c("D, 10 x 1.5 g direct", "D, 2 x 7.5 g direct", "D, 1 x 15 g indirect",
                                                               "D, 1 x 15 g PO4 buffer", "P, 10 x 1.5 g direct", "P, 2 x 7.5 g direct",
                                                               "P, 1 x 15 g indirect","P, 1 x 15 g PO4 buffer"), ordered = TRUE)
-p <- ggplot(div, aes(x = rep.columns, y = gamma.value, colour = measure2)) + 
+p <- ggplot(div, aes(x = rep.combos, y = value, colour = measure2)) + 
   geom_jitter(alpha = 0.5) +
   scale_colour_manual(values = c("#E69F00", "#56B4E9")) +
   scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) +
-  xlab("Number of pooled PCR replicates per subplot/method (restricted to OTUs in at least 3 PCRs)") + ylab("alpha diversity") +
-  facet_grid(gene ~ method2_subplot, scales = "free") +
+  xlab(paste0("Number of pooled PCR replicates per subplot/method (restricted to OTUs in at least ", restr.thr, " PCRs)")) + ylab("alpha diversity") +
+  facet_grid(gene ~ method2.subplot, scales = "free") +
   theme(strip.background = element_blank(), panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), legend.position = "None")
 p
 
-ggsave(p, "Wx80_all_genes_PCR_reps_restr3_alpha-0-1.pdf", height = 21, width = 29.7, units = "cm", useDingbats = FALSE)
+ggsave("Wx80_all_genes_PCR_reps_restr_2_alpha-0-1.pdf", height = 21, width = 29.7, units = "cm", useDingbats = FALSE)
 
 ### Plot alpha 0/1 curves for all data subsampled by percentages of sequences, for both subplots together
-div <- all.div[all.div$measure2 != "2" & all.div$var == "percent_subsamples", ]
+div <- all.div[all.div$measure2 != "2" & all.div$variable == "percent_subsamples", ]
 div$method2.subplot <- paste0(div$subplot, ", ", div$method2)
 div$rep.columns <- div$rep.columns * 10
 div$method2.subplot <- factor(div$method2.subplot, levels = c("D, 10 x 1.5 g direct", "D, 2 x 7.5 g direct", "D, 1 x 15 g indirect",
                                                               "D, 1 x 15 g PO4 buffer", "P, 10 x 1.5 g direct", "P, 2 x 7.5 g direct",
                                                               "P, 1 x 15 g indirect","P, 1 x 15 g PO4 buffer"), ordered = TRUE)
-p <- ggplot(div, aes(x = rep.columns, y = gamma.value, colour = measure2)) + 
+p <- ggplot(div, aes(x = rep.combos, y = value, colour = measure2)) + 
   geom_jitter(alpha = 0.5) +
   scale_colour_manual(values = c("#E69F00", "#56B4E9")) +
   scale_x_continuous(breaks = c(20, 40, 60, 80, 100)) +
